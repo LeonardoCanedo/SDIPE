@@ -44,6 +44,38 @@ function consultGEIP(GTIN, GIEP) {
   }
 };
 
+// Function that treats IDs
+function treatIDString(id) {
+	var string = id.replace(/[^0-9a-zA-Z]/g, ' ');
+	var words = string.split(' ');
+
+	words = words.map((word) => {
+			return word.charAt(0).toUpperCase() + word.slice(1);
+		});
+	  // Join the words together without spaces
+	  return words.join('');
+};
+
+// Returns the Golden Record (deduplicated product)
+function getGoldenRecord (objeto, skuReferenceType) {
+
+    var references = objeto.queryReferencedBy(skuReferenceType);
+    var retorno = false;
+
+    //manipulação das referencias
+    references.forEach( function ( nodes ) {
+        retorno = nodes.getSource();
+        return true;
+    });
+
+    return retorno;
+};
+
+// Returns object type ID
+function getObjectType (node) {
+	return node.getObjectType().getID() + "";
+};
+
 // Function to get the attribute values from string 
 function getAttributeValuesFromString(parameter, data){
 	// parameter = '"Brand":'
@@ -204,20 +236,97 @@ function createProduct2EntityReference(node, entity, productToEntityRT, manager,
 	};
 };
 
-function getGoldenRecord (objeto, skuReferenceType) {
 
-    var references = objeto.queryReferencedBy(skuReferenceType);
-    var retorno = false;
 
-    //manipulação das referencias
-    references.forEach( function ( nodes ) {
-        retorno = nodes.getSource();
-        return true;
-    });
+// The functions below serve to get the specific features of each products and fill the respective attributes, also treats ID's
+var stringData = data;
+function getFeaturesAttributes(slicedTilFeatures) {
 
-    return retorno;
-}
+	var slicedTilFirstValue = slicedTilFeatures.slice(slicedTilFeatures.indexOf('"Value":')+9);
+	var endValueString = slicedTilFirstValue.indexOf('"');
+	var featureValue = slicedTilFirstValue.substring(slicedTilFirstValue, endValueString);
+		
+	var slicedTilAttributeName = slicedTilFirstValue.slice(slicedTilFirstValue.indexOf('"Value":')+9);
+	stringData = slicedTilAttributeName;
+	var endAttributeNameString = slicedTilAttributeName.indexOf('"');
+	var attributeNameValue = slicedTilAttributeName.substring(0, endAttributeNameString);
 
-function getObjectType (node) {
-	return node.getObjectType().getID() + "";
-}
+	return { attributeName: attributeNameValue, featureValue: featureValue };
+
+};
+
+function getHowManyAttributes(data) {
+	var slicedTilFeaturesGroups = data.slice(data.indexOf('"FeaturesGroups":')+17);
+	var word = '"Localized":';
+	var count = 0;
+	var index = slicedTilFeaturesGroups.indexOf(word);
+
+	var featuresDataArray = [];
+
+	while (index !== -1) {
+	  var slicedTilFeatures = stringData.slice(stringData.indexOf(word)+11);
+	  var result = getFeaturesAttributes(slicedTilFeatures);
+
+       featuresDataArray.push(result.attributeName);
+       featuresDataArray.push(result.featureValue);
+	  
+	  count++;
+	  index = slicedTilFeaturesGroups.indexOf(word, index + 1);
+	}
+
+	return featuresDataArray;
+	
+};
+
+function getFeaturesIntoProduct(featuresDataArray){
+	for (i in featuresDataArray){
+		if(i % 2 == 0){
+			// treating attribute names
+			var treatedID = treatIDString(featuresDataArray[i]);
+
+			var key = parseInt(i) + 1;
+
+			try {
+			    var attributeToSearch = String(lookUpTable.getLookupTableValue("DeParaEnriquecimento", treatedID));
+				if(Biblioteca_EnriquecimentoExterno.getObjectType(node) == "ItemVenda"){
+					var goldenRecord = Biblioteca_EnriquecimentoExterno.getGoldenRecord(node, skuReferenceType);
+					goldenRecord.getValue(attributeToSearch).setValue(featuresDataArray[key]);
+				} else {
+					node.getValue(attributeToSearch).setValue(featuresDataArray[key]);
+				} node.getValue(attributeToSearch).setValue(featuresDataArray[key]);
+			} catch (IllegalArgumentException) {
+
+			    logger.info("Não tem o attributo " + treatedID);
+			    continue; // Continue with the next iteration of the loop
+			}	
+		} 
+	};
+};
+
+// Functions that gets all the pics of the product gallery		
+var stringImageData = data;
+function getFeaturesUrl(slicedTilLowPic){
+	var slicedTilFirstValue = slicedTilLowPic.slice(slicedTilLowPic.indexOf('"Pic":')+7);
+	var endValueString = slicedTilFirstValue.indexOf('"');
+	var featureValue = slicedTilFirstValue.substring(slicedTilFirstValue, endValueString);
+
+	stringImageData = slicedTilFirstValue;
+	return featureValue;
+	};
+	
+var imagesUrlArray = [];
+function getAllProductImagesFromGallery(data){
+	var slicedTilGallery = data.slice(data.indexOf('"Gallery":')+10);
+	var word = '"LowPic":';
+	var index = slicedTilGallery.indexOf(word);
+
+	while (index !== -1) {
+	  var slicedTilLowPic = stringImageData.slice(stringImageData.indexOf(word)+11);
+	  var imageURL = getFeaturesUrl(slicedTilLowPic);
+
+	  imagesUrlArray.push(imageURL);
+
+	  index = slicedTilGallery.indexOf(word, index + 1);
+	}
+	return imagesUrlArray
+};
